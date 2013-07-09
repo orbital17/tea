@@ -66,7 +66,8 @@ class FileSource : public DataSource
 
         int8_t getc()
         {
-            return (int8_t)fgetc(file) ;
+        	char r = fgetc(file);
+            return (int8_t)r ;
         }
         
         bool hasNext()
@@ -90,7 +91,8 @@ class FileTarget : public DataTarget
         }
         int putc(int8_t c)
         {
-            return fputc((char)c, file);
+            fputc((char)c, file);
+            return !ferror(file);
         }
 };
 
@@ -222,10 +224,19 @@ void engine(DataSource * source, DataTarget  * target, DataSource * keySource, M
     int j;
     bool doNotExitCycle = source->hasNext();
 	readBytes(keySource, key, 16);
+	printf("--\n");
     while(doNotExitCycle)
     {
         readBytes(source, v, 8);
+		for(int i=0; i<8; i++)
+		{
+			printf("%d\n", v[i]);
+		}
         crypt((int32_t*)v, (int32_t*)key, mode, number_of_iteration);
+		for(int i=0; i<8; i++)
+		{
+			printf("%d\n", v[i]);
+		}
         putBytes(target, v, 8);
         doNotExitCycle = source->hasNext();
     }
