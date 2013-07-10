@@ -4,7 +4,7 @@
 #include <string.h>
 #include <time.h>
 
-void strcopy(char * dest, char * source, size_t size = 0)
+void strcopy(char * dest, char const * source, size_t size = 0)
 {
 	if (0 == size) size = strlen(source);
 	while (size > 0) 
@@ -27,12 +27,12 @@ static int32_t calc_v(int32_t const * v, int32_t const * k, int n, int32_t sum)
 void crypt(int32_t* v, int32_t const * k, Mode mode, unsigned int number_of_iteration)
 {
     const int32_t delta = 0x9e3779b9;
-    int orderVar, i;
+    int orderVar;
     int32_t sum, multiplier;
     multiplier = (mode == ENCRYPT) ? 1 : -1;
     orderVar = (mode == ENCRYPT) ? 0 : 1;
     sum = (mode == ENCRYPT) ? delta : delta * number_of_iteration;
-    for (i=0; i < number_of_iteration; i++)
+    for (int i=0; i < number_of_iteration; i++)
     {
         v[orderVar] += multiplier * calc_v(v, k, orderVar, sum);
         v[1 - orderVar] += multiplier * calc_v(v, k, 1 - orderVar, sum);
@@ -41,27 +41,31 @@ void crypt(int32_t* v, int32_t const * k, Mode mode, unsigned int number_of_iter
 }
 
 
-class DataSource
+class IDataSource
 {
     public:
         virtual int8_t getc() = 0;
         virtual bool hasNext() = 0;
 };
 
-class DataTarget
+class IDataTarget
 {
     public:
-        virtual int putc(int8_t) = 0;
+    	//return no error indicator
+        virtual bool putc(int8_t) = 0;
 };
 
-class FileSource : public DataSource
+class FileSource : public IDataSource
 {
+	private:
         FILE * file;
+        char nextChar; //we need this to make possible correct work of hasNext and not waste of speed simultaneously
 
     public:
-        FileSource(char * filename)
+        FileSource(char const* filename)
         {
             file = fopen(filename, "rb");
+            nextChar = fgetc(file);
         }
         
         ~FileSource()
@@ -71,32 +75,31 @@ class FileSource : public DataSource
 
         int8_t getc()
         {
-        	char r = fgetc(file);
-            return (int8_t)r ;
+        	int8_t result = (int8_t)nextChar;
+        	nextChar = fgetc(file);
+        	return result;
         }
         
         bool hasNext()
         {
-        	char a = fgetc(file);
-        	ungetc(a, file);
-        	return (a!=EOF);
+        	return !feof(file);
         	
         }
 };
 
-class FileTarget : public DataTarget
+class FileTarget : public IDataTarget
 {
     private:
         FILE * file;
 
     public:
-        FileTarget(char * filename)
+        FileTarget(char const* filename)
         {
             file = fopen(filename, "wb");
         }
-        int putc(int8_t c)
+        bool putc(int8_t c)
         {
-            fputc((char)c, file);
+            fputc(c, file);
             return !ferror(file);
         }
         
@@ -104,9 +107,14 @@ class FileTarget : public DataTarget
         {
         	fclose(file);
         }
+        
+        void rewindFile()
+        {
+        	rewind(file);
+        }
 };
 
-class RandomSource : public DataSource
+class RandomSource : public IDataSource
 {
 	private:
 		int leftData;
@@ -129,16 +137,16 @@ class RandomSource : public DataSource
         }
 };
 
-class NullTarget : public DataTarget
+class NullTarget : public IDataTarget
 {
 	public:
-		int putc(int8_t c)
+		bool putc(int8_t c)
 		{
-			return 1;
+			return true;
 		}
 };
 
-class StringSource : public DataSource
+class StringSource : public IDataSource
 {
 	private:
 		char * string;
@@ -154,20 +162,19 @@ class StringSource : public DataSource
 			return size;
 		}
 		
-		void setValue(char * s, size_t _size=0)
+		void setValue(char const* s, size_t _size=0)
 		{
-			if (_size == 0)
-			{
-				size = strlen(s);
-			}
-			else
-				size = _size;
-			string = (char*)malloc(size+1);
+			size = _size ? _size : strlen(s);
+			string = new char[size + 1];
 			strcopy(string, s, size);
 		}
-		StringSource(char * s, size_t _size=0)
+		StringSource(char const * s, size_t _size=0)
 		{
 			setValue(s, _size);
+		}
+		~StringSource()
+		{
+			delete[] string;
 		}
 		bool hasNext()
 		{
@@ -184,7 +191,7 @@ class StringSource : public DataSource
 		}
 };
 
-class StringTarget: public DataTarget
+class StringTarget: public IDataTarget
 {
 	private:
 		char * string;
@@ -199,27 +206,31 @@ class StringTarget: public DataTarget
 		StringTarget(size_t stringSize)
 		{
 			size = stringSize;
-			string = (char*)malloc(stringSize+1);
+			string = new char[stringSize+1];
 			reset();
 		}
 		
-		int putc(int8_t c)
+		~StringTarget()
+		{
+			delete[] string;
+		}
+		
+		bool putc(int8_t c)
 		{
 			if (iter<size)
 			{
 				string[iter] = c;
 				string[++iter] = 0;
-				return 1;
+				return true;
 			}
 			else
 			{
-				return 0;
+				return false;
 			}
 		}
 		char * getValue()
 		{
-			char * r;
-			r = (char*) malloc(size+1);
+			char * r = new char[size+1];
 			strcopy(r, string, iter);
 			return r;
 		}
@@ -230,38 +241,89 @@ class StringTarget: public DataTarget
 		}	
 };
 
-void readBytes(DataSource * source, int8_t * target, size_t n)
+// returns number of bytes, that was readed
+size_t readBytes(IDataSource * source, int8_t * target, size_t n)
 {
-    for(int i=0; i<n; i++)
+	int i;
+    for(i=0; i<n && source->hasNext(); i++)
     {
-        target[i] = (source->hasNext() ? source->getc() : 0);
+        target[i] = source->getc();
     }
-    
+    for(int j=i; j<n; j++)
+    {
+    	target[j] = 0;
+    }
+    return i;
 }
 
-int putBytes(DataTarget *target, int8_t* source, size_t n)
+//returns no error indicator
+bool putBytes(IDataTarget *target, int8_t const* source, size_t n)
 {
-    int r = 1;
-    for(int i=0; i<n && r; i++)
+    bool result = true;
+    for(int i=0; i<n && result; i++)
     {
-        r = target->putc(source[i]);
+        result = target->putc(source[i]);
     }
-    return r;
+    return result;
 }
 
-void engine(DataSource * source, DataTarget  * target, DataSource * keySource, Mode mode, unsigned int number_of_iteration = 32)
+//return number of bytes, that was readed during the last iteration
+size_t engine(IDataSource * source, IDataTarget  * target, IDataSource * keySource, Mode mode, 
+			size_t numberOfBytesInTheLastBlock = 8, size_t numberOfIterations = 32)
 {
     int8_t v[8], key[16];
     bool doNotExitCycle = source->hasNext();
 	readBytes(keySource, key, 16);
+	size_t result;
     while(doNotExitCycle)
     {
-        readBytes(source, v, 8);
-        crypt((int32_t*)v, (int32_t*)key, mode, number_of_iteration);
-        putBytes(target, v, 8);
+        result = readBytes(source, v, 8);
+        crypt((int32_t*)v, (int32_t*)key, mode, numberOfIterations);
         doNotExitCycle = source->hasNext();
+        putBytes(target, v, doNotExitCycle? 8 : numberOfBytesInTheLastBlock);
     }
+    return result;
 }
 
+void generateKeyToFile(char const* keyFile)
+{
+	const size_t keySize = 16;
+	IDataSource* source = new RandomSource(keySize);
+	IDataTarget* target = new FileTarget(keyFile);
+	int8_t key[keySize];
+	readBytes(source, key, keySize);
+	putBytes(target, key, keySize);
+	delete source;
+	delete target;
+}
 
+void cryptFile(char const * source, char const * target, char const * keyFile, Mode mode)
+{
+	const size_t keySize = 16;
+	int8_t key[keySize];	
+	IDataSource* keySource = new FileSource(keyFile);
+	readBytes(keySource, key, keySize);
+	delete keySource;
+	
+	int8_t bytesInLastBlock = 8;
+	FileSource* _source = new FileSource(source);
+	FileTarget* _target = new FileTarget(target);
+
+	
+	if (mode == ENCRYPT) 
+		putBytes(_target, &bytesInLastBlock, 1);//to allocate space at the beginning of file
+	else
+		readBytes(_source, &bytesInLastBlock, 1);
+		
+	bytesInLastBlock = engine(_source, _target, new StringSource((char*)key, keySize), mode, bytesInLastBlock);
+	
+	if (mode == ENCRYPT){
+		_target->rewindFile();
+		putBytes(_target, &bytesInLastBlock, 1);
+	}
+
+	delete _source;
+	delete _target;
+	
+}
 

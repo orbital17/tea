@@ -5,7 +5,7 @@
 void strcpyIsWorking()
 {
 	char * text = "fjdsklg";
-	char * dest = (char*)malloc(10);
+	char * dest = new char[10];
 	strcopy(dest, text, 7);
 	assert( 0 == strcmp(text, dest) );
 	strcopy(dest, text);
@@ -47,8 +47,7 @@ void readBytesIsWorking()
 {
 	char * text = "jljkljkljjk";
 	StringSource* a = new StringSource(text);
-	int8_t *s;
-	s = (int8_t*)malloc(strlen(text)+1);
+	int8_t *s = new int8_t[strlen(text)+1];
 	s[strlen(text)]=0;
 	readBytes(a, s, strlen(text));
 	assert(0 == strcmp((char*)s, text));
@@ -111,6 +110,15 @@ void filesTesting(Mode mode)
 	delete b;
 }
 
+void cryptFileTest()
+{
+	char * in = "in.txt";
+	char * t = "temp.txt";
+	char * out = "out.txt";
+	char * key = "key.txt";
+	cryptFile(in, t, key, ENCRYPT);
+	cryptFile(t, out, key, DECRYPT);
+}
 
 int main()
 {
@@ -122,6 +130,7 @@ int main()
 	putBytesIsWorking();
 	crypt_decryptOfEncryptIsTheSame();
 	engine_decryptOfEncryptIsTheSame();
-	filesTesting(ENCRYPT);
-	filesTesting(DECRYPT);
+//	filesTesting(ENCRYPT);
+//	filesTesting(DECRYPT);
+	cryptFileTest();
 }
