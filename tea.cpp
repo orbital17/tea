@@ -4,17 +4,17 @@
 #include <string.h>
 #include <time.h>
 
-#pragma warning
-
-void strcopy(char * dest, char * source)
+void strcopy(char * dest, char * source, size_t size = 0)
 {
-	while ( *dest = *source) 
+	if (0 == size) size = strlen(source);
+	while (size > 0) 
 	{
-		
-		source++;
-		dest++;
+		*dest = *source;
+		++source;
+		++dest;
+		--size;
 	}
-	*dest = *source;
+	*dest = 0;
 }
 
 typedef enum {ENCRYPT, DECRYPT} Mode;
@@ -61,7 +61,12 @@ class FileSource : public DataSource
     public:
         FileSource(char * filename)
         {
-            file = fopen(filename, "r");
+            file = fopen(filename, "rb");
+        }
+        
+        ~FileSource()
+        {
+        	fclose(file);
         }
 
         int8_t getc()
@@ -87,12 +92,17 @@ class FileTarget : public DataTarget
     public:
         FileTarget(char * filename)
         {
-            file = fopen(filename, "w");
+            file = fopen(filename, "wb");
         }
         int putc(int8_t c)
         {
             fputc((char)c, file);
             return !ferror(file);
+        }
+        
+        ~FileTarget()
+        {
+        	fclose(file);
         }
 };
 
@@ -132,28 +142,44 @@ class StringSource : public DataSource
 {
 	private:
 		char * string;
+		size_t size;
 	public:		
 		char * getValue()
 		{
 			return string;
 		}
 		
-		void setValue(char * s)
+		size_t getSize()
 		{
-			string = s;
+			return size;
 		}
-		StringSource(char * s)
+		
+		void setValue(char * s, size_t _size=0)
 		{
-			setValue(s);
+			if (_size == 0)
+			{
+				size = strlen(s);
+			}
+			else
+				size = _size;
+			string = (char*)malloc(size+1);
+			strcopy(string, s, size);
+		}
+		StringSource(char * s, size_t _size=0)
+		{
+			setValue(s, _size);
 		}
 		bool hasNext()
 		{
-			return (0!=(*string));
+			return (size > 0);
 		}
 		int8_t getc()
 		{
 			char r = *string;
-			if (r) ++string;
+			if (size > 0) {
+				++string;
+				--size;
+			}
 			return r;
 		}
 };
@@ -162,12 +188,12 @@ class StringTarget: public DataTarget
 {
 	private:
 		char * string;
-		size_t size, i;
+		size_t size, iter;
 	public:
 		void reset()
 		{
 			string[0] = 0;
-			i=0;
+			iter=0;
 		}
 		
 		StringTarget(size_t stringSize)
@@ -179,10 +205,10 @@ class StringTarget: public DataTarget
 		
 		int putc(int8_t c)
 		{
-			if (i<size)
+			if (iter<size)
 			{
-				string[i] = c;
-				string[++i] = 0;
+				string[iter] = c;
+				string[++iter] = 0;
 				return 1;
 			}
 			else
@@ -194,8 +220,13 @@ class StringTarget: public DataTarget
 		{
 			char * r;
 			r = (char*) malloc(size+1);
-			strcopy(r, string);
+			strcopy(r, string, iter);
 			return r;
+		}
+		
+		size_t getSize()
+		{
+			return iter;
 		}	
 };
 
@@ -221,22 +252,12 @@ int putBytes(DataTarget *target, int8_t* source, size_t n)
 void engine(DataSource * source, DataTarget  * target, DataSource * keySource, Mode mode, unsigned int number_of_iteration = 32)
 {
     int8_t v[8], key[16];
-    int j;
     bool doNotExitCycle = source->hasNext();
 	readBytes(keySource, key, 16);
-	printf("--\n");
     while(doNotExitCycle)
     {
         readBytes(source, v, 8);
-		for(int i=0; i<8; i++)
-		{
-			printf("%d\n", v[i]);
-		}
         crypt((int32_t*)v, (int32_t*)key, mode, number_of_iteration);
-		for(int i=0; i<8; i++)
-		{
-			printf("%d\n", v[i]);
-		}
         putBytes(target, v, 8);
         doNotExitCycle = source->hasNext();
     }
